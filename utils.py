@@ -5,6 +5,9 @@ import streamlit as st
 import openai
 from langchain.llms import AzureOpenAI
 import os
+from dotenv import load_dotenv
+
+load_dotenv()
 
 # Contact Project Administrator to get these
 TENANT_ID = os.getenv("TENANT_ID")

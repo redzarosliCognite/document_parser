@@ -30,10 +30,10 @@ class DocumentParser:
     def _similar(self, a, b):
         return SequenceMatcher(None, a, b).ratio()
 
-    def get_pages(self, file_path, number_pages=2):
+    def get_pages(self, number_pages=2):
         schema_keys = list(self.schema.keys())
         if self.file_path is not None:
-            with pdfplumber.open(file_path) as pdf:
+            with pdfplumber.open(self.file_path) as pdf:
                 all_pages=[]
                 for idx,__ in enumerate(pdf.pages):
                     text=pdf.pages[idx].extract_text()
@@ -86,28 +86,28 @@ class DocumentParser:
         return text
         # return df
         
-    def parse_prompt(self, multiple_pages=False):
-        if multiple_pages:
+    def parse_prompt(self):
+        if self.method == 'multiple':
             pages = self.get_single_page(self.page_num)
             pages = '    ' + pages.replace('\n', '\n    ')
           
-        else:
+        elif self.method == 'single':
             pages = self.get_pages(number_pages=2)
             pages = '    ' + pages.replace('\n', '\n    ')
           
         schema_string = json.dumps(self.schema)
 
         self.prompt = f""" 
-        Find the keys from the %SCHEMA% from the following %DOCUMENT%. The response should be STRICTLY a json response in the format of the %SCHEMA%. Return with null if you dont know.
+Find the keys from the %SCHEMA% from the following %DOCUMENT%. The response should be STRICTLY a json response in the format of the %SCHEMA%. Return with null if you dont know.
 
 
-        %SCHEMA%
-            {schema_string}
+%SCHEMA%
+{schema_string}
 
-        %DOCUMENT%
-        {pages}
+%DOCUMENT%
+{pages}
 
-        %YOUR RESPONSE%:
+%YOUR RESPONSE%:
 
         """
       
@@ -232,13 +232,14 @@ class DocumentParser:
     def document_extraction_single(self, upload_to_dm):
         self.schema = self.get_schema()
 
-        prompt = self.parse_prompt(self.schema)
+        prompt = self.parse_prompt()
 
         if self.llm != None:
             res = self.llm(prompt)
         else:
             res = self.send_to_gpt(prompt)
 
+        self.raw_res = res
         res = json.loads(res)
         self.gpt_res = res
 
@@ -251,7 +252,7 @@ class DocumentParser:
             for page_num in tqdm(range(page_min, page_max)):
                 self.page_num = page_num
 
-                prompt = self.parse_prompt(self.schema, multiple_pages=True)
+                prompt = self.parse_prompt()
 
                 if self.llm != None:
                     res = self.llm(prompt)

@@ -10,26 +10,38 @@ from tqdm import tqdm
 import io
 
 class DocumentParser:
-    def __init__(self, client,  project, external_id, space, version, llm=None, file_path=None, file_id=None):
+    def __init__(self, client, project, data_model, space, version, llm=None):
         self.client = client
         self.project = project
-        self.external_id = external_id
+        self.data_model = data_model
         self.space = space
         self.version = version
         self.page_num = False
         self.llm = llm
-        self.file_path = file_path
-        self.file_id = file_id
+        self.file_path = None
+        self.file_id = None
         
-        if self.file_path is None and self.file_id is None:
-            raise Exception('Must provide either a file path or file id')
-        
-        if self.file_path is not None and self.file_id is not None:
-            raise Exception('Must provide either a file path or file id, not both')
-      
+        self.get_data_model()
+ 
     def _similar(self, a, b):
         return SequenceMatcher(None, a, b).ratio()
-
+    
+    def get_data_model(self):
+        body = {
+            "items": [
+                {
+                    "externalId": self.data_model,
+                    "space": self.space,
+                    "version": self.version
+                }
+            ]
+        }
+        res = self.client.post(f'/api/v1/projects/{self.project}/models/datamodels/byids', json=body)
+        res = res.json()
+        self.data_model = res
+                
+        self.views = [view['externalId'] for view in self.data_model['items'][0]['views']]
+                
     def get_pages(self, number_pages=2):
         schema_keys = list(self.schema.keys())
         if self.file_path is not None:
@@ -63,10 +75,10 @@ class DocumentParser:
         df = pd.concat(df)
         df = df.sort_values('score', ascending=False)
         
-        df2 = df.groupby('page').sum(numeric_only=True)
-        df2 = df2.sort_values('score', ascending=False)
-        pages = df2.index.tolist()[:number_pages]
-        pages = [all_pages[i] for i in pages]
+        df_sum = df.groupby('page').sum(numeric_only=True)
+        df_sum = df_sum.sort_values('score', ascending=False)
+        self.pages_index = df_sum.index.tolist()[:number_pages]
+        pages = [all_pages[i] for i in self.pages_index]
 
         
         return '\n'.join(pages)
@@ -98,30 +110,37 @@ class DocumentParser:
         schema_string = json.dumps(self.schema)
 
         self.prompt = f""" 
-Find the keys from the %SCHEMA% from the following %DOCUMENT%. The response should be STRICTLY a json response in the format of the %SCHEMA%. Return with null if you dont know.
+Find the keys from the %SCHEMA% from the following %DOCUMENT%. The %DOCUMENT% starts from %START% and ends at %END%. The response should be STRICTLY a json response in the format of the %SCHEMA%. Return with null if you dont know.
 
 
 %SCHEMA%
+
 {schema_string}
 
 %DOCUMENT%
+%START%
 {pages}
+%END%
 
 %YOUR RESPONSE%:
-
+```json
         """
       
         return self.prompt
       
         
   
-    def get_schema(self):
+    def get_schema(self, schema_id):
+        for view in self.data_model['items'][0]['views']:
+            if view['externalId'] == schema_id:
+                self.view_version = view['version']
+                
         self.get_schema_body = {
             "items": [
                 {
-                    "externalId": self.external_id,
+                    "externalId": schema_id,
                     "space": self.space,
-                    "version": self.version
+                    "version": self.view_version
                 }
             ]
         }
@@ -199,8 +218,8 @@ Find the keys from the %SCHEMA% from the following %DOCUMENT%. The response shou
                 "source": {
                     "type": "view",
                     "space": self.space,
-                    "externalId": self.external_id,
-                    "version": f"{self.version}"
+                    "externalId": self.schema_id,
+                    "version": self.view_version
                 },
                 "properties": res
                 }
@@ -230,7 +249,7 @@ Find the keys from the %SCHEMA% from the following %DOCUMENT%. The response shou
         return res.json()['choices'][0]['message']['content']
         
     def document_extraction_single(self, upload_to_dm):
-        self.schema = self.get_schema()
+        self.schema = self.get_schema(self.schema_id)
 
         prompt = self.parse_prompt()
 
@@ -248,7 +267,8 @@ Find the keys from the %SCHEMA% from the following %DOCUMENT%. The response shou
         
     def document_extraction_multiple(self, page_min, page_max, upload_to_dm):
         with get_openai_callback() as cb:
-            self.schema = self.get_schema()
+            self.schema = self.get_schema(self.schema_id)
+            self.all_gpt_res = []
             for page_num in tqdm(range(page_min, page_max)):
                 self.page_num = page_num
 
@@ -261,14 +281,30 @@ Find the keys from the %SCHEMA% from the following %DOCUMENT%. The response shou
                     
                 res = json.loads(res)
                 self.gpt_res = res
-                    
+                res['prompt'] = prompt
+                self.all_gpt_res.append(res)
+                
                 if upload_to_dm:
                     self.upload_to_dm()
+                    
+                    
+        self.all_gpt_res = pd.DataFrame(self.all_gpt_res)
             
         self.cb = cb
         
-    def document_extraction(self, method=Literal["single", "multiple"], page_min=None, page_max=None, upload_to_dm=True):
-        self.method = method
+    def document_extraction(self, schema_id, method=Literal["single", "multiple"], file_path=None, file_id=None, page_min=None, page_max=None, upload_to_dm=True):
+        self.schema_id = schema_id
+        self.method = method 
+        self.file_path = file_path
+        self.file_id = file_id
+        
+        if self.file_path is None and self.file_id is None:
+            raise Exception('Must provide either a file path or file id')
+        
+        if self.file_path is not None and self.file_id is not None:
+            raise Exception('Must provide either a file path or file id, not both')
+      
+      
         if method == "single":
             if page_min!=None or page_max!=None:
                 raise ValueError("page_min and page_max must not be specified for single page extraction")

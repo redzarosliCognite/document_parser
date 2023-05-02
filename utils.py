@@ -1,3 +1,4 @@
+import base64
 from cognite.client import CogniteClient, ClientConfig
 from msal import PublicClientApplication
 from cognite.client.credentials import Token
@@ -51,3 +52,10 @@ def configure_llm():
     openai.api_key = os.getenv("AZURE_OPENAI_API_KEY")
 
     return AzureOpenAI(deployment_name="document-parser", temperature=0, openai_api_key=os.getenv("AZURE_OPENAI_API_KEY"), openai_api_base="https://openai-experiment.openai.azure.com/", max_tokens=1000)
+
+def show_pdf(file_path, page_num=1, width=1000):
+    with open(file_path,"rb") as f:
+        base64_pdf = base64.b64encode(f.read()).decode('utf-8')
+    pdf_display = f'<iframe src="data:application/pdf;base64,{base64_pdf}#page={page_num}" width="{width}" height="800" type="application/pdf"></iframe>'
+    
+    return pdf_display

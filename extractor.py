@@ -193,7 +193,7 @@ Find the keys from the %SCHEMA% from the following %DOCUMENT%. The %DOCUMENT% st
         else:
             external_id = filename
 
-        keys = [self.keys_remap[key] for key in self.gpt_res.keys()]
+        keys = [self.keys_remap[key] for key in self.gpt_res.keys() if key!='prompt']
         values = list(self.gpt_res.values())
         tmp = dict(zip(keys, values))
         res = {}

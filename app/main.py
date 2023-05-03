@@ -54,6 +54,7 @@ file_location = st.radio(
 file_path = None
 file_id = None
 file_content = None
+
 if file_location == 'Local':
     if schema_id == 'Pump':
         files = os.listdir('localdev-pump_data_sheets')
@@ -81,6 +82,15 @@ if file_location == 'Local':
             files)
         
         file_path = os.path.join('localdev-instrument_data_sheets', file)
+        
+    elif schema_id in ['PumpISO14224', 'PumpISO2']:
+        files = os.listdir('localdev-pump_data_sheets')
+    
+        file = st.selectbox(
+            'Select a file',
+            files)
+        
+        file_path = os.path.join('localdev-pump_data_sheets', file)
     
 else:
     file_external_id = st.text_input('File ID', value='')
@@ -114,13 +124,23 @@ if file_type=='Multiple Assets':
     page_max = int(st.text_input('Page Max', value=60))
     
 show_prompt = st.sidebar.checkbox('Show Prompt', value=False)
+upload_to_dm = st.sidebar.checkbox('Do not upload to DM', value=False)
 
 if st.button('Extract Data From Document'):
     if file_type=='Single Asset':
         with st.spinner('Executing...'):
-            extractor.document_extraction(schema_id, method="single", upload_to_dm=True, file_path=file_path, file_id=file_id)
+            extractor.document_extraction(schema_id, method="single", upload_to_dm=upload_to_dm, file_path=file_path, file_id=file_id)
         st.write('Completed!')
         
+        col1, col2 = st.columns([3,1])
+
+
+        pdf_display = show_pdf(file_path, page_num=extractor.pages_index[0])
+        col1.markdown(pdf_display, unsafe_allow_html=True)
+
+        col2.header("GPT Response")
+        col2.write(extractor.gpt_res)
+    
         extractor.upload_to_dm()
         
         # if upload_to_dm:
@@ -128,7 +148,7 @@ if st.button('Extract Data From Document'):
             
     elif file_type=='Multiple Assets':
         with st.spinner('Executing...'):
-            extractor.document_extraction(schema_id, method="multiple", page_min=page_min, page_max=page_max, upload_to_dm=True,  file_path=file_path, file_id=file_id)
+            extractor.document_extraction(schema_id, method="multiple", page_min=page_min, page_max=page_max, upload_to_dm=upload_to_dm,  file_path=file_path, file_id=file_id)
         st.write('Completed!')
         st.write(extractor.all_gpt_res)
         
@@ -137,14 +157,6 @@ if st.button('Extract Data From Document'):
         # else:
         #     st.write(extractor.gpt_res)
         
-    # col1, col2 = st.columns([3,1])
-
-    
-    # pdf_display = show_pdf(file_path, page_num=extractor.pages_index[0])
-    # col1.markdown(pdf_display, unsafe_allow_html=True)
-
-    # col2.header("GPT Response")
-    # col2.write(extractor.gpt_res)
     
     if show_prompt:
         st.write(extractor.prompt)

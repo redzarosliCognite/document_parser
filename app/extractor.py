@@ -1,11 +1,10 @@
 from difflib import SequenceMatcher
 import os
 from typing import Literal
-import openai
 import pdfplumber
 import pandas as pd
 import json
-from langchain.callbacks import get_openai_callback
+# from langchain.callbacks import get_openai_callback
 from tqdm import tqdm
 import io
 
@@ -110,7 +109,7 @@ class DocumentParser:
         schema_string = json.dumps(self.schema)
 
         self.prompt = f""" 
-Find the keys from the %SCHEMA% from the following %DOCUMENT%. The %DOCUMENT% starts from %START% and ends at %END%. The response should be STRICTLY a json response in the format of the %SCHEMA%. Return with null if you dont know.
+Find the keys from the %SCHEMA% from the following %DOCUMENT%. The %DOCUMENT% starts from %START% and ends at %END%. The response should be STRICTLY a json response in the format of the %SCHEMA%. If you dont know the answer for a key in %SCHEMA% return with null.
 
 
 %SCHEMA%
@@ -175,6 +174,7 @@ Find the keys from the %SCHEMA% from the following %DOCUMENT%. The %DOCUMENT% st
                     type_remap[property] = type_map[key_type]
         
         self.keys_remap = keys_remap
+        self.keys_remap_reverse = {v: k for k, v in keys_remap.items()}
         self.type_remap = type_remap
     
         
@@ -198,6 +198,10 @@ Find the keys from the %SCHEMA% from the following %DOCUMENT%. The %DOCUMENT% st
         tmp = dict(zip(keys, values))
         res = {}
         for key, value in tmp.items():
+            if value == self.schema[self.keys_remap_reverse[key]]: # skip if response from GPT just returns types (i.e "text", "float", etc)
+                print(key)
+                print(value)
+                continue
             try:
                 value = self.type_remap[key](value)
                 res[key] = value
@@ -266,31 +270,29 @@ Find the keys from the %SCHEMA% from the following %DOCUMENT%. The %DOCUMENT% st
             self.upload_to_dm()
         
     def document_extraction_multiple(self, page_min, page_max, upload_to_dm):
-        with get_openai_callback() as cb:
-            self.schema = self.get_schema(self.schema_id)
-            self.all_gpt_res = []
-            for page_num in tqdm(range(page_min, page_max)):
-                self.page_num = page_num
+        self.schema = self.get_schema(self.schema_id)
+        self.all_gpt_res = []
+        for page_num in tqdm(range(page_min, page_max)):
+            self.page_num = page_num
 
-                prompt = self.parse_prompt()
+            prompt = self.parse_prompt()
 
-                if self.llm != None:
-                    res = self.llm(prompt)
-                else:
-                    res = self.send_to_gpt(prompt)
-                    
-                res = json.loads(res)
-                self.gpt_res = res
-                res['prompt'] = prompt
-                self.all_gpt_res.append(res)
+            if self.llm != None:
+                res = self.llm(prompt)
+            else:
+                res = self.send_to_gpt(prompt)
                 
-                if upload_to_dm:
-                    self.upload_to_dm()
-                    
+            res = json.loads(res)
+            self.gpt_res = res
+            res['prompt'] = prompt
+            self.all_gpt_res.append(res)
+            
+            if upload_to_dm:
+                self.upload_to_dm()
+                
                     
         self.all_gpt_res = pd.DataFrame(self.all_gpt_res)
             
-        self.cb = cb
         
     def document_extraction(self, schema_id, method=Literal["single", "multiple"], file_path=None, file_id=None, page_min=None, page_max=None, upload_to_dm=True):
         self.schema_id = schema_id

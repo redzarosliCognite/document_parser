@@ -120,11 +120,12 @@ file_type = st.radio(
     ('Single Asset','Multiple Assets'))
 
 if file_type=='Multiple Assets':
-    page_min = int(st.text_input('Page Min', value=50))
-    page_max = int(st.text_input('Page Max', value=60))
+    page_start = int(st.text_input('Page Min', value=50))
+    page_end = int(st.text_input('Page Max', value=60))
     
 show_prompt = st.sidebar.checkbox('Show Prompt', value=False)
-upload_to_dm = st.sidebar.checkbox('Do not upload to DM', value=False)
+# upload_to_dm = st.sidebar.checkbox('Upload to DM', value=True)
+upload_to_dm = True
 
 if st.button('Extract Data From Document'):
     if file_type=='Single Asset':
@@ -148,7 +149,7 @@ if st.button('Extract Data From Document'):
             
     elif file_type=='Multiple Assets':
         with st.spinner('Executing...'):
-            extractor.document_extraction(schema_id, method="multiple", page_min=page_min, page_max=page_max, upload_to_dm=upload_to_dm,  file_path=file_path, file_id=file_id)
+            extractor.document_extraction(schema_id, method="multiple", page_start=page_start, page_end=page_end, upload_to_dm=upload_to_dm,  file_path=file_path, file_id=file_id)
         st.write('Completed!')
         st.write(extractor.all_gpt_res)
         

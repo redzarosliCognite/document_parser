@@ -9,15 +9,16 @@ import openai
 import os
 from dotenv import load_dotenv
 
+
+
 load_dotenv()
 
-# Contact Project Administrator to get these
-# Contact Project Administrator to get these
-TENANT_ID = "d4f21b24-81a6-4563-af51-5d8c9b7301bf"
-CLIENT_ID = "f4111639-51b2-45be-ba74-bdee364fde45"
+TENANT_ID = os.getenv('TENANT_ID')
+CLIENT_ID = os.getenv('CLIENT_ID')
 
-CDF_CLUSTER = "api"  # api, westeurope-1 etc
-COGNITE_PROJECT = "petro-tech-staging"
+CDF_CLUSTER = os.getenv('CDF_CLUSTER') # api, westeurope-1 etc
+COGNITE_PROJECT = os.getenv('COGNITE_PROJECT') 
+
 
 BASE_URL = f"https://{CDF_CLUSTER}.cognitedata.com"
 SCOPES = [f"https://{CDF_CLUSTER}.cognitedata.com/.default"]
@@ -25,14 +26,10 @@ SCOPES = [f"https://{CDF_CLUSTER}.cognitedata.com/.default"]
 AUTHORITY_HOST_URI = "https://login.microsoftonline.com"
 AUTHORITY_URI = AUTHORITY_HOST_URI + "/" + TENANT_ID
 PORT = 53000
+    
+# Contact Project Administrator to get these
+# Contact Project Administrator to get these
 
-def get_client_redirect():
-
-    creds = authenticate_azure()
-    # cnf = ClientConfig(client_name="my-special-client", project=COGNITE_PROJECT, credentials=Token(creds["access_token"]), base_url=BASE_URL)
-    cnf = ClientConfig(client_name="my-special-client", project=COGNITE_PROJECT, credentials=creds, base_url=BASE_URL)
-    client = CogniteClient(cnf)
-    return client
 
 def authenticate_azure():
 
@@ -41,6 +38,14 @@ def authenticate_azure():
     # interactive login - make sure you have http://localhost:port in Redirect URI in App Registration as type "Mobile and desktop applications"
     creds = app.acquire_token_interactive(scopes=SCOPES, port=PORT)
     return creds
+
+def get_client_redirect():
+
+    creds = authenticate_azure()
+    cnf = ClientConfig(client_name="my-special-client", project=COGNITE_PROJECT, credentials=Token(creds["access_token"]), base_url=BASE_URL)
+    # cnf = ClientConfig(client_name="my-special-client", project=COGNITE_PROJECT, credentials=oken(token), base_url=BASE_URL)
+    client = CogniteClient(cnf)
+    return client
 
 @st.cache_resource
 def get_client(token, cluster, project):

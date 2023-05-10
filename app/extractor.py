@@ -37,6 +37,9 @@ class DocumentParser:
         }
         res = self.client.post(f'/api/v1/projects/{self.project}/models/datamodels/byids', json=body)
         res = res.json()
+        if res['items'] == []:
+            raise ValueError('Data Model not found')
+        
         self.data_model = res
                 
         self.views = [view['externalId'] for view in self.data_model['items'][0]['views']]
@@ -47,7 +50,7 @@ class DocumentParser:
             with pdfplumber.open(self.file_path) as pdf:
                 all_pages=[]
                 for idx,__ in enumerate(pdf.pages):
-                    text=pdf.pages[idx].extract_text()
+                    text=pdf.pages[idx].extract_text(layout=True, x_density=3)
                     all_pages.append(text)
         else:
             file_bytes = self.client.files.download_bytes(id=self.file_id)
@@ -55,7 +58,7 @@ class DocumentParser:
             with pdfplumber.open(data) as pdf:
                 all_pages=[]
                 for idx,__ in enumerate(pdf.pages):
-                    text=pdf.pages[idx].extract_text()
+                    text=pdf.pages[idx].extract_text(layout=True, x_density=3)
                     all_pages.append(text)
 
 
@@ -86,13 +89,13 @@ class DocumentParser:
         if self.file_path is not None:
             with pdfplumber.open(self.file_path) as pdf:
                 page = pdf.pages[page_num-1]
-                text = page.extract_text()
+                text = page.extract_text(layout=True, x_density=3)
         else:
             file_bytes = self.client.files.download_bytes(id=self.file_id)
             data=io.BytesIO(file_bytes)
             with pdfplumber.open(data) as pdf:
                 page = pdf.pages[page_num-1]
-                text = page.extract_text()
+                text = page.extract_text(layout=True, x_density=3)
                 
         return text
         # return df
@@ -109,7 +112,7 @@ class DocumentParser:
         schema_string = json.dumps(self.schema)
 
         self.prompt = f""" 
-Find the keys from the %SCHEMA% from the following %DOCUMENT%. The %DOCUMENT% starts from %START% and ends at %END%. The response should be STRICTLY a json response in the format of the %SCHEMA%. If you dont know the answer for a key in %SCHEMA% return with null.
+Find the keys from the %SCHEMA% from the following %DOCUMENT%. The %DOCUMENT% starts from %START% and ends at %END%. The response should STRICTLY be a json response. If you dont know the answer for a key in %SCHEMA% return with null.
 
 
 %SCHEMA%
@@ -181,59 +184,6 @@ Find the keys from the %SCHEMA% from the following %DOCUMENT%. The %DOCUMENT% st
         return schema
 
 
-
-    def upload_to_dm(self):
-        if self.file_path is not None:
-            filename = self.file_path.split('/')[-1].split('.')[0]
-        else:
-            filename = self.file_id
-            
-        if self.page_num:
-            external_id = f"{filename}_{self.page_num}"
-        else:
-            external_id = filename
-
-        keys = [self.keys_remap[key] for key in self.gpt_res.keys() if key!='prompt']
-        values = list(self.gpt_res.values())
-        tmp = dict(zip(keys, values))
-        res = {}
-        for key, value in tmp.items():
-            if value == self.schema[self.keys_remap_reverse[key]]: # skip if response from GPT just returns types (i.e "text", "float", etc)
-                print(key)
-                print(value)
-                continue
-            try:
-                value = self.type_remap[key](value)
-                res[key] = value
-            except ValueError:
-                pass
-            except TypeError:
-                pass
-            
-        self.upload_to_dm_body = {
-        "items": [
-            {
-            "instanceType": "node",
-            "space": self.space,
-            "externalId": external_id,
-            "existingVersion": self.version,
-            "sources": [
-                {
-                "source": {
-                    "type": "view",
-                    "space": self.space,
-                    "externalId": self.schema_id,
-                    "version": self.view_version
-                },
-                "properties": res
-                }
-            ]
-            }
-        ]
-        }
-
-        self.upload_res = self.client.post(f'/api/v1/projects/{self.project}/models/instances', json=self.upload_to_dm_body)
-        
     def send_to_gpt(self, prompt):
         url = f"/api/v1/projects/{self.project}/context/gpt/chat/completions"
         json = {
@@ -251,6 +201,62 @@ Find the keys from the %SCHEMA% from the following %DOCUMENT%. The %DOCUMENT% st
         self.usage = res.json()['usage']
         
         return res.json()['choices'][0]['message']['content']
+    
+    def process_response(self):
+        if self.file_path is not None:
+            filename = self.file_path.split('/')[-1].split('.')[0]
+        else:
+            filename = self.file_id
+            
+        if self.page_num:
+            self.external_id = f"{filename}_{self.page_num}"
+        else:
+            self.external_id = filename
+            
+        keys = [self.keys_remap[key] for key in self.gpt_res.keys() if key!='prompt']
+        values = list(self.gpt_res.values())
+        tmp = dict(zip(keys, values))
+        res = {}
+        for key, value in tmp.items():
+            if value == self.schema[self.keys_remap_reverse[key]]: # skip if response from GPT just returns types (i.e "text", "float", etc)
+                print(key)
+                print(value)
+                continue
+            try:
+                value = self.type_remap[key](value)
+                res[key] = value
+            except ValueError:
+                pass
+            except TypeError:
+                pass
+            
+        self.processed_res = res
+        
+    def upload_to_dm(self):
+        self.upload_to_dm_body = {
+        "items": [
+            {
+            "instanceType": "node",
+            "space": self.space,
+            "externalId": self.external_id,
+            "existingVersion": self.version,
+            "sources": [
+                {
+                "source": {
+                    "type": "view",
+                    "space": self.space,
+                    "externalId": self.schema_id,
+                    "version": self.view_version
+                },
+                "properties": self.processed_res
+                }
+            ]
+            }
+        ]
+        }
+
+        self.upload_res = self.client.post(f'/api/v1/projects/{self.project}/models/instances', json=self.upload_to_dm_body)
+        
         
     def document_extraction_single(self, upload_to_dm):
         self.schema = self.get_schema(self.schema_id)
@@ -266,13 +272,15 @@ Find the keys from the %SCHEMA% from the following %DOCUMENT%. The %DOCUMENT% st
         res = json.loads(res)
         self.gpt_res = res
 
+        self.process_response()
+        
         if upload_to_dm:
             self.upload_to_dm()
         
-    def document_extraction_multiple(self, page_min, page_max, upload_to_dm):
+    def document_extraction_multiple(self, page_start, page_end, upload_to_dm):
         self.schema = self.get_schema(self.schema_id)
         self.all_gpt_res = []
-        for page_num in tqdm(range(page_min, page_max)):
+        for page_num in tqdm(range(page_start, page_end)):
             self.page_num = page_num
 
             prompt = self.parse_prompt()
@@ -287,6 +295,8 @@ Find the keys from the %SCHEMA% from the following %DOCUMENT%. The %DOCUMENT% st
             res['prompt'] = prompt
             self.all_gpt_res.append(res)
             
+            self.process_response()
+            
             if upload_to_dm:
                 self.upload_to_dm()
                 
@@ -294,7 +304,7 @@ Find the keys from the %SCHEMA% from the following %DOCUMENT%. The %DOCUMENT% st
         self.all_gpt_res = pd.DataFrame(self.all_gpt_res)
             
         
-    def document_extraction(self, schema_id, method=Literal["single", "multiple"], file_path=None, file_id=None, page_min=None, page_max=None, upload_to_dm=True):
+    def document_extraction(self, schema_id, method=Literal["single", "multiple"], file_path=None, file_id=None, page_start=None, page_end=None, upload_to_dm=True):
         self.schema_id = schema_id
         self.method = method 
         self.file_path = file_path
@@ -308,12 +318,12 @@ Find the keys from the %SCHEMA% from the following %DOCUMENT%. The %DOCUMENT% st
       
       
         if method == "single":
-            if page_min!=None or page_max!=None:
-                raise ValueError("page_min and page_max must not be specified for single page extraction")
+            if page_start!=None or page_end!=None:
+                raise ValueError("page_start and page_end must not be specified for single page extraction")
             self.document_extraction_single(upload_to_dm)
         elif method == "multiple":
-            if page_min==None or page_max==None:
-                raise ValueError("page_min and page_max must be specified for multiple page extraction") 
-            self.document_extraction_multiple(page_min, page_max, upload_to_dm)
+            if page_start==None or page_end==None:
+                raise ValueError("page_start and page_end must be specified for multiple page extraction") 
+            self.document_extraction_multiple(page_start, page_end, upload_to_dm)
         else:
             raise ValueError("Method must be either single or multiple")
